@@ -1,0 +1,277 @@
+---
+title: "Points of Interest: Waterfalls in Western North Carolina"
+output: html_document
+date: "2025-05-13"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+# Install required packages if not already installed
+if (!require("pacman")) install.packages("pacman")
+pacman::p_load(sf, tigris, ggplot2, dplyr, ggspatial, elevatr, raster, ggrepel)
+
+# Download and prepare waterfall data
+temp <- tempfile()
+download.file("https://dit-cgia-gis-data.s3.amazonaws.com/NCOM-data/hydrography/hylocalrez_Point_shape.zip", temp)
+unzip(temp, exdir = tempdir())
+
+# Read the shapefile and filter for waterfalls
+hydro_points <- st_read(file.path(tempdir(), "hylocalrez_Point.shp"))
+
+```
+
+
+```{r}
+waterfalls <- hydro_points[hydro_points$FTYPE == 487, ]
+waterfalls <- na.omit(waterfalls)
+
+# Identify Upper Whitewater Falls and other waterfalls
+is_upper_falls <- grepl("Upper Falls", waterfalls$GNIS_NAME, ignore.case = TRUE)
+upper_whitewater <- waterfalls[is_upper_falls, ]
+other_waterfalls <- waterfalls[!is_upper_falls, ]
+
+# Get the waterfall extent
+waterfall_bbox <- st_bbox(waterfalls)
+print("Waterfall extent:")
+print(waterfall_bbox)
+```
+
+
+```{r}
+# Create bounding box for western NC
+context_bbox <- st_bbox(c(
+  xmin = 350000,
+  xmax = 1300000,
+  ymin = 350000,
+  ymax = 1200000
+))
+print("Map extent:")
+print(context_bbox)
+
+# Get NC and surrounding states
+all_states <- states() %>%
+  filter(STUSPS %in% c("NC", "SC", "GA", "TN", "VA")) %>%
+  st_transform(crs = st_crs(waterfalls))
+
+nc_state <- all_states %>% filter(STUSPS == "NC")
+surrounding_states <- all_states %>% filter(STUSPS != "NC")
+
+# Create context box as sf object
+context_sf <- st_as_sfc(context_bbox) %>%
+  st_set_crs(st_crs(waterfalls))
+
+# Crop states to context area
+western_nc <- st_crop(nc_state, context_bbox)
+surrounding_context <- st_crop(surrounding_states, context_bbox)
+```
+
+
+```{r}
+# Get elevation data
+nc_elev <- get_elev_raster(context_sf, z = 9)
+nc_elev_df <- data.frame(rasterToPoints(nc_elev))
+names(nc_elev_df) <- c("x", "y", "elevation")
+
+# Create contour lines
+contours <- rasterToContour(nc_elev, nlevels = 20)
+contours_sf <- st_as_sf(contours)
+```
+
+
+```{r}
+# Define color palette
+water_color <- "#4FB6E0"
+land_color <- "#2A5A6C"
+accent_color <- "#E0F4FF"
+text_color <- "#FFFFFF"
+highlight_color <- "#FFD700"
+surrounding_color <- "#3D3B38"
+callout_bg_color <- "#1F2937"
+nc_fill_color <- "#2E3032"
+
+# Create elevation color palette
+terrain_colors <- colorRampPalette(c(
+  "#4A4C4E",  # Base (warm gray)
+  "#5E6062",  # Mid-low
+  "#727476",  # Medium
+  "#86888A",  # Mid-high
+  "#9A9C9E"   # Peaks
+))(100)
+```
+
+```{r}
+# Extract coordinates for Upper Whitewater Falls
+upper_whitewater_coords <- st_coordinates(upper_whitewater)
+upper_whitewater_df <- data.frame(
+  x = upper_whitewater_coords[,1] + 90000,
+  y = upper_whitewater_coords[,2] + 150000, 
+  label = paste0("Upper Falls, Highest NC Waterfall (411 ft)")
+)
+```
+
+
+```{r}
+# Create the map
+ggplot() +
+  # First layer: surrounding states as base
+  geom_sf(data = surrounding_context,
+          fill = surrounding_color,
+          color = NA,
+          alpha = 0.8) +
+  # Draw only the borders for surrounding states
+  geom_sf(data = surrounding_context,
+          fill = NA,
+          color = accent_color,
+          size = 1) +
+  # Add elevation background
+  geom_raster(data = nc_elev_df, 
+              aes(x = x, y = y, fill = elevation), 
+              alpha = 1) +
+  scale_fill_gradientn(
+    colors = terrain_colors,
+    na.value = "transparent"
+  ) +
+  # Add contour lines
+  geom_sf(data = contours_sf,
+          color = "#FFFFFF",
+          alpha = 0.15,
+          size = 0.2) +
+  # Add NC state boundary
+  geom_sf(data = western_nc, 
+          fill = nc_fill_color, 
+          color = accent_color, 
+          size = 1.2,
+          alpha = 0.7) +
+  # Add waterfall points
+  geom_sf(data = other_waterfalls, 
+          color = water_color, 
+          size = 12,
+          alpha = 0.2) +
+  geom_sf(data = other_waterfalls, 
+          color = water_color, 
+          size = 8,
+          alpha = 0.4) +
+  geom_sf(data = other_waterfalls, 
+          color = accent_color, 
+          size = 5) +
+  # Add Upper Falls highlight
+  geom_sf(data = upper_whitewater,
+          color = highlight_color,
+          size = 14,
+          alpha = 0.2) +
+  geom_sf(data = upper_whitewater,
+          color = highlight_color,
+          size = 10,
+          alpha = 0.4) +
+  geom_sf(data = upper_whitewater,
+          color = highlight_color,
+          size = 6) +
+  geom_segment(
+    aes(
+      x = upper_whitewater_coords[,1],
+      y = upper_whitewater_coords[,2],
+      xend = upper_whitewater_df$x,
+      yend = upper_whitewater_df$y - 40
+    ),
+    color = "#FFD700",
+    linewidth = 1
+  ) +
+  geom_label_repel(
+    data = upper_whitewater_df,
+    aes(x = x, y = y, label = label),
+    color = "#FFD700",
+    fill = callout_bg_color,
+    size = 12,
+    fontface = "bold",
+    box.padding = 1,
+    point.padding = 1,
+    segment.color = "#FFD700",
+    segment.size = 1,
+    label.padding = unit(0.5, "lines")
+  ) +
+  # Add state labels
+  geom_sf_text(data = surrounding_context,
+               aes(label = STUSPS),
+               color = accent_color,
+               alpha = 0.2,
+               size = 6,
+               fontface = "bold") +
+  # Set map extent
+  coord_sf(
+    xlim = c(context_bbox["xmin"], context_bbox["xmax"]),
+    ylim = c(context_bbox["ymin"], context_bbox["ymax"]),
+    expand = FALSE
+  ) +
+  theme(
+    plot.background = element_rect(fill = "transparent", color = NA),
+    panel.background = element_rect(fill = "transparent", color = NA),
+    plot.title = element_blank(),
+    plot.caption = element_text(
+      size = 10,
+      color = accent_color,
+      margin = margin(t = 0, r = 10, b = 10, l = 0),
+      hjust = 0.95
+    ),
+    legend.position = "none",
+    plot.margin = unit(c(0, 0, 0, 0), "pt"),
+    axis.text = element_blank(),
+    axis.ticks = element_blank()
+  ) +
+  annotation_north_arrow(
+    location = "tl",
+    which_north = "true",
+    pad_x = unit(1.5, "cm"),
+    pad_y = unit(2, "cm"),
+    height = unit(1.5, "cm"),
+    width = unit(1.5, "cm"),
+    style = north_arrow_fancy_orienteering(
+      fill = c(accent_color, water_color),
+      line_col = text_color,
+      text_size = 8
+    )
+  ) +
+  annotation_scale(
+    location = "br",
+    bar_cols = c(accent_color, water_color),
+    text_col = text_color,
+    line_col = text_color,
+    pad_x = unit(1, "cm"),
+    pad_y = unit(1, "cm"),
+    height = unit(0.3, "cm"),
+    width_hint = 0.4
+  ) +
+  annotate(
+    "text",
+    x = as.numeric(context_bbox["xmin"]) + 40000,
+    y = as.numeric(context_bbox["ymin"]) + 40000,
+    label = "Data: NC OneMap Hydrography",
+    hjust = 0,  # left align
+    vjust = 0,  # bottom align
+    color = accent_color,
+    size = 12,
+    fontface = "plain"
+  ) +
+  # Title
+  annotate(
+    "text",
+    x = mean(c(as.numeric(context_bbox["xmin"]), as.numeric(context_bbox["xmax"]))),
+    y = as.numeric(context_bbox["ymax"]) - 30000,
+    label = "Waterfalls of Western North Carolina",
+    hjust = 0.5,
+    vjust = 1,
+    color = accent_color,
+    size = 30,
+    fontface = "bold"
+  )
+
+# Save
+ggsave("nc_waterfalls_map.png", 
+       width = 12, 
+       height = 8, 
+       dpi = 300,
+       bg = "transparent") 
+```
+

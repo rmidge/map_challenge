@@ -1,0 +1,194 @@
+---
+title: "Untitled"
+output: html_document
+date: "2025-05-13"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(ggplot2)
+library(osmdata)
+library(usmap)
+library(showtext)
+font_add_google("Montserrat", "mont")
+showtext_auto()
+```
+
+```{r}
+min_lon <- -78.05      # further west (more land)
+max_lon <- -77.70      # further east (more ocean)
+min_lat <- 34.05       # further south (more coastline)
+max_lat <- 34.35       # further north
+bbx <- rbind(x = c(min_lon, max_lon), y = c(min_lat, max_lat))
+colnames(bbx) <- c("min", "max")
+
+```
+
+
+```{r}
+highways <- bbx %>%
+  opq()%>%
+  add_osm_feature(key = "highway", 
+                  value=c("motorway", "trunk",
+                          "primary","secondary", 
+                          "tertiary","motorway_link",
+                          "trunk_link","primary_link",
+                          "secondary_link",
+                          "tertiary_link")) %>%
+  osmdata_sf()
+```
+
+
+```{r pressure, echo=FALSE}
+streets <- bbx %>%
+  opq()%>%
+  add_osm_feature(key = "highway", 
+                  value = c("residential", "living_street",
+                            "service","unclassified",
+                            "pedestrian", "footway",
+                            "track","path")) %>%
+  osmdata_sf()
+```
+
+
+```{r}
+ggplot() +
+  geom_sf(data = streets$osm_lines,
+          aes(color=highway),
+          size = .4,
+          alpha = .65)+
+  theme_void()
+```
+```{r}
+color_roads <- rgb(0.42,0.449,0.488)
+ggplot() +
+  geom_sf(data = streets$osm_lines,
+          col = color_roads,
+          size = .4,
+          alpha = .65) +
+  geom_sf(data = highways$osm_lines,
+          col = color_roads,
+          size = .6,
+          alpha = .8)+
+  coord_sf(xlim = c(min_lon,max_lon),
+           ylim = c(min_lat,max_lat),
+         expand = FALSE)+
+  theme(legend.position = F) + theme_void()
+```
+
+```{r}
+require(tigris)
+counties_nc <- counties(state="nc",cb=T,class="sf",)
+```
+
+
+```{r}
+library(sf)
+counties_nc <- st_crop(counties_nc,
+                       xmin=min_lon,xmax=max_lon,
+                       ymin=min_lat,ymax=max_lat)
+ggplot() + 
+  geom_sf(data=counties_nc,fill="gray",lwd=0)+
+  coord_sf(xlim = c(min(bbx[1,]), max(bbx[1,])), 
+         ylim = c(min(bbx[2,]), max(bbx[2,])),
+         expand = FALSE)+
+  theme(legend.position = F) + theme_void()
+```
+
+```{r}
+get_water <- function(county_GEOID){
+  area_water("NC", county_GEOID, class = "sf")
+}
+water <- do.call(rbind, 
+                 lapply(counties_nc$COUNTYFP,get_water))
+```
+
+
+```{r}
+ggplot() + 
+  geom_sf(data=counties_nc)+
+  geom_sf(data=water,
+          inherit.aes = F,
+          col="red")+
+  coord_sf(xlim = c(min(bbx[1,]), max(bbx[1,])), 
+         ylim = c(min(bbx[2,]), max(bbx[2,])),
+         expand = FALSE)+
+  theme(legend.position = F) + theme_void()
+```
+
+
+```{r}
+st_erase <- function(x, y) {
+  st_difference(x, st_union(y))
+}
+counties_nc <- st_erase(st_union(counties_nc),water)
+```
+
+```{r}
+ggplot() + 
+  geom_sf(data=counties_nc,
+          lwd=0)+
+  coord_sf(xlim = c(min(bbx[1,]), max(bbx[1,])), 
+         ylim = c(min(bbx[2,]), max(bbx[2,])),
+         expand = FALSE)+
+  theme(legend.position = F) + theme_void()
+```
+
+
+
+```{r}
+ggplot() + 
+  geom_sf(data=counties_nc,
+          inherit.aes= FALSE,
+          lwd=0.0,fill=rgb(0.95,0.95,0.95))+
+  coord_sf(xlim = c(min(bbx[1,]), max(bbx[1,])), 
+         ylim = c(min(bbx[2,]), max(bbx[2,])),
+         expand = FALSE)+
+  theme(legend.position = F) + theme_void()+
+  theme(panel.background=element_rect(fill = "black"))
+```
+
+
+```{r}
+color_roads <- "#FF6600"   # vivid orange for strong contrast
+my_map <- ggplot() + 
+  geom_sf(data = counties_nc,
+          inherit.aes = FALSE,
+          lwd = 0.0,
+          fill = "#FAF9F6") +  # Land: off-white
+  geom_sf(data = streets$osm_lines,
+          inherit.aes = FALSE,
+          color = color_roads,
+          size = 0.4,
+          alpha = 0.65) +
+  geom_sf(data = highways$osm_lines,
+          inherit.aes = FALSE,
+          color = color_roads,
+          size = 0.6,
+          alpha = 0.65) +
+  coord_sf(xlim = c(min(bbx[1,]), max(bbx[1,])),
+           ylim = c(min(bbx[2,]), max(bbx[2,])),
+           expand = FALSE) +
+  theme(legend.position = "F") + 
+  theme_void() +
+  theme(panel.background = element_rect(
+    fill = "black"
+  )) +
+  annotate("text",
+           x = max(bbx[1,]) - 0.01,
+           y = min(bbx[2,]) + 0.01,
+           label = "Wilmington, NC",
+           hjust = 1, vjust = 0,
+           size = 65,
+           color = "white",
+           family = "mont")
+```
+
+
+```{r}
+ggsave("wilmington_map.png", my_map, width = 10, height = 14, dpi = 600)
+```

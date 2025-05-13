@@ -1,0 +1,98 @@
+---
+title: "Choropleth Map of Philadelphia Population Density"
+output: html_document
+date: "2025-05-13"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse) 
+library(sf)
+library(showtext)
+font_add_google("Montserrat", "mont")
+showtext_auto()
+
+# Set color palette
+pal <- c("#bb3e03","#ee9b00","#e9d8a6","#94d2bd","#0a9396","#005f73")
+# Set color background
+bck <- "#001219"
+
+# Set theme 
+theme_custom <- theme_void() +
+  theme(
+    plot.margin = margin(1,1,10,1,"pt"),
+    plot.background = element_rect(fill=bck, color=NA),
+    legend.position = "bottom",
+    legend.title = element_text(
+      hjust = 0.5,
+      margin = margin(t = 5, b = 5),
+      color = "white",
+      face = "bold"
+    ),
+    legend.text = element_text(color = "white"),
+    plot.caption = element_text(
+      family = "mont",
+      size = 14,
+      color = "white",
+      hjust = 0.9,
+      margin = margin(t = 20)
+    )
+  )
+
+# 2022 5-year estimates (2018-2022)
+map <- st_read("C:/Users/rache/Documents/Github/Philly-Homeowners/Data/phila_census1.gpkg")
+```
+
+```{r}
+# Breaks for population density
+clean <- map %>%
+  mutate(clss = case_when(
+    pop_density < 5000 ~ "1",
+    pop_density < 10000 ~ "2",
+    pop_density < 15000 ~ "3",
+    pop_density < 20000 ~ "4",
+    pop_density < 30000 ~ "5",
+    TRUE ~ "6"
+  ))
+
+
+# Assign the plot to an object
+p <- ggplot(clean, aes(fill=clss)) +
+  geom_sf() +
+  labs(
+    title = "Philadelphia",
+    fill = "Population Density\n(people/sq mi)",
+    caption = "Source: 2022 5-year estimates American Community Survey (ACS)"
+  ) +
+  guides(
+    fill = guide_legend(
+      nrow = 1,
+      title.position = "top",
+      label.position = "bottom"
+    )
+  ) +
+  scale_fill_manual(
+    values = pal,
+    labels = c("< 5,000", "< 10,000", "< 15,000", "< 20,000", "< 30,000", "≥ 30,000")
+  ) +
+  theme_custom +
+  theme(
+    text = element_text(size = 20, family = "mont"),
+    plot.title = element_text(
+      family = "mont", 
+      size = 56,
+      face = "bold", 
+      color = "white", 
+      hjust = 0.5, 
+      margin = margin(b = 30)
+    ),
+    legend.title = element_text(size = 22, family = "mont"),
+    legend.text = element_text(size = 18, family = "mont")
+  )
+
+# Save
+ggsave("philly_density_map.png", plot = p, width = 7, height = 10, dpi = 300, bg = bck)
+```
